@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "106205377239",
+    "project_id": "firstfinance-65b17",
+    "storage_bucket": "firstfinance-65b17.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:106205377239:android:f7fb7c0a8372eedad4b692",
+        "android_client_info": {
+          "package_name": "com.example.flutter_webview_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBrWqB166oZDO6H3wL_cd-g0CqESmCcKUI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
