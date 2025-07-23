@@ -1,16 +1,33 @@
-# flutter_webview_app
+# First Finance Flutter App
 
-A new Flutter project.
+A full-screen Flutter app that loads the [First Finance Website](https://firstfinance.xpresspaisa.in/home.php) in a secure WebView, supports Firebase Cloud Messaging (FCM), and integrates features like local notifications, file picker, and permission handling.
 
-## Getting Started
+## 🚀 Features
 
-This project is a starting point for a Flutter application.
+- 🌐 Full-screen WebView (via `flutter_inappwebview`)
+- 🔔 Firebase Cloud Messaging push notifications
+- 📦 Local notifications via `flutter_local_notifications`
+- 🧠 Smart navigation for `tel:`, `mailto:`, and `WhatsApp` links
+- 🖼️ File upload & media picker support
+- 🔐 Permissions: camera, microphone, storage, notifications
+- 🔄 JavaScript handler to register FCM token via `onLogin`
+- 📉 Reduced APK size using ProGuard
+- 🎯 Android support with hybrid composition
 
-A few resources to get you started if this is your first Flutter project:
+## 🛠️ Technologies
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+- Flutter 3.7.2
+- Firebase Core & Messaging
+- flutter_inappwebview
+- flutter_local_notifications
+- permission_handler
+- url_launcher
+- http
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## 📦 Setup
+
+### 1. Clone the repo
+
+```bash
+git clone https://github.com/your-username/first-finance-flutter-app.git
+cd first-finance-flutter-app
