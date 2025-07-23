@@ -29,5 +29,5 @@ A full-screen Flutter app that loads the [First Finance Website](https://firstfi
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/your-username/first-finance-flutter-app.git
+git clone https://github.com/sumanm202/first-finance-flutter-app.git
 cd first-finance-flutter-app
