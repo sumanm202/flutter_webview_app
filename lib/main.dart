@@ -77,20 +77,34 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
+    // Navigate to WebViewPage after a 2-second delay
     Timer(const Duration(seconds: 2), () {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const WebViewPage()),
       );
     });
   }
-
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
       backgroundColor: Colors.white,
-      body: Center(child: CircularProgressIndicator()),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Image.asset(
+              'assets/images/logo.png', // 🔁 Your logo path here
+              width: 150,
+              height: 150,
+            ),
+            SizedBox(height: 20),
+            CircularProgressIndicator(), // Optional: Keep this for loading indicator
+          ],
+        ),
+      ),
     );
   }
+
 }
 
 class WebViewPage extends StatefulWidget {
