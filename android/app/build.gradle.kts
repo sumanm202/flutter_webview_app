@@ -7,14 +7,14 @@ plugins {
 
 android {
     namespace = "com.example.flutter_webview_app"
-    compileSdk = 35
+    compileSdk = rootProject.extra["compileSdkVersion"] as Int
 
     ndkVersion = "27.0.12077973" // ✅ Only if using native C++/FFmpeg
 
     defaultConfig {
         applicationId = "com.example.flutter_webview_app"
-        minSdk = 23
-        targetSdk = 35
+        minSdk = rootProject.extra["minSdkVersion"] as Int
+        targetSdk = rootProject.extra["targetSdkVersion"] as Int
         versionCode = 1
         versionName = "1.0"
 
@@ -22,8 +22,7 @@ android {
     }
 
     buildTypes {
-        release {
-            // ⚠️ Use real signing config for production builds
+        getByName("release") {
             isMinifyEnabled = false
             isShrinkResources = false
             proguardFiles(
@@ -36,7 +35,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
-        isCoreLibraryDesugaringEnabled = true // ✅ Java 8+ API support
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -49,12 +48,12 @@ android {
 }
 
 dependencies {
-    // ✅ Java 8+ desugaring (LocalDate, Stream, etc.)
+    // ✅ Java 8+ desugaring
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
-    // ✅ Firebase dependencies
+    // ✅ Firebase
     implementation("com.google.firebase:firebase-messaging:25.0.0")
-    implementation("com.google.firebase:firebase-analytics:21.6.1") // ✅ Latest stable as of mid-2025
+    implementation("com.google.firebase:firebase-analytics:21.6.1")
     // implementation("com.google.firebase:firebase-crashlytics") // Optional
 }
 

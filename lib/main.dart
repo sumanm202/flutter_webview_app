@@ -9,8 +9,12 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+// Local notifications plugin initialization
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+
+// Android notification channel setup
 const AndroidNotificationChannel channel = AndroidNotificationChannel(
   'high_importance_channel',
   'High Importance Notifications',
@@ -19,6 +23,7 @@ const AndroidNotificationChannel channel = AndroidNotificationChannel(
   playSound: true,
 );
 
+/// Firebase background message handler
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   print('🔔 Background message: ${message.messageId}');
@@ -27,6 +32,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   print('📦 Background data: ${message.data}');
 }
 
+/// Entry point of the application
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
@@ -42,6 +48,7 @@ void main() async {
     sound: true,
   );
 
+  // Request permissions
   await [
     Permission.camera,
     Permission.microphone,
@@ -53,12 +60,13 @@ void main() async {
   runApp(const MyApp());
 }
 
+/// Root widget of the application
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge); // show status bar and nav
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     return const MaterialApp(
       debugShowCheckedModeBanner: false,
       home: SplashScreen(),
@@ -66,6 +74,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
+/// Splash screen that checks for stored session ID
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -77,38 +86,43 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    // Navigate to WebViewPage after a 2-second delay
-    Timer(const Duration(seconds: 2), () {
+    Timer(const Duration(seconds: 2), () async {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? sessionId = prefs.getString('PHPSESSID');
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const WebViewPage()),
+        MaterialPageRoute(
+          builder: (_) => WebViewPage(sessionId: sessionId),
+        ),
       );
     });
   }
+
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    return Scaffold(
       backgroundColor: Colors.white,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Image.asset(
-              'assets/images/logo.png', // 🔁 Your logo path here
+              'assets/images/logo.png',
               width: 150,
               height: 150,
             ),
-            SizedBox(height: 20),
-            CircularProgressIndicator(), // Optional: Keep this for loading indicator
+            const SizedBox(height: 20),
+            const CircularProgressIndicator(),
           ],
         ),
       ),
     );
   }
-
 }
 
+/// WebView page with login tracking, FCM handling, and session persistence
 class WebViewPage extends StatefulWidget {
-  const WebViewPage({super.key});
+  final String? sessionId;
+  const WebViewPage({super.key, this.sessionId});
 
   @override
   State<WebViewPage> createState() => _WebViewPageState();
@@ -126,6 +140,7 @@ class _WebViewPageState extends State<WebViewPage> {
     initFCM();
   }
 
+  /// Initializes Firebase Cloud Messaging and sets up local notifications
   Future<void> initFCM() async {
     const InitializationSettings initSettings = InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
@@ -181,6 +196,7 @@ class _WebViewPageState extends State<WebViewPage> {
     });
   }
 
+  /// Sends user ID and FCM token to backend to register for push notifications
   Future<void> registerToken(String userId, String token) async {
     try {
       final response = await http.post(
@@ -199,6 +215,7 @@ class _WebViewPageState extends State<WebViewPage> {
     }
   }
 
+  /// Handles back button to support WebView navigation or app exit confirmation
   Future<bool> _onBackPressed() async {
     if (webViewController != null && await webViewController!.canGoBack()) {
       webViewController!.goBack();
@@ -235,6 +252,9 @@ class _WebViewPageState extends State<WebViewPage> {
               InAppWebView(
                 initialUrlRequest: URLRequest(
                   url: WebUri("https://firstfinance.xpresspaisa.in/home.php"),
+                  headers: widget.sessionId != null ? {
+                    'Cookie': 'PHPSESSID=${widget.sessionId}'
+                  } : null,
                 ),
                 initialSettings: InAppWebViewSettings(
                   javaScriptEnabled: true,
@@ -260,6 +280,15 @@ class _WebViewPageState extends State<WebViewPage> {
                         _userId = args[0].toString();
                         print("👤 Logged in User ID: $_userId");
 
+                        final cookies = await CookieManager.instance().getCookies(url: WebUri("https://firstfinance.xpresspaisa.in"));
+                        for (var cookie in cookies) {
+                          if (cookie.name == 'PHPSESSID') {
+                            SharedPreferences prefs = await SharedPreferences.getInstance();
+                            await prefs.setString('PHPSESSID', cookie.value);
+                            print("💾 Saved PHPSESSID: ${cookie.value}");
+                          }
+                        }
+
                         if (_fcmToken != null && _userId != null) {
                           await registerToken(_userId!, _fcmToken!);
                         }
@@ -277,14 +306,13 @@ class _WebViewPageState extends State<WebViewPage> {
                   final uri = action.request.url;
                   final scheme = uri?.scheme;
 
-                  // ✅ Loader starts immediately
                   setState(() => _isLoading = true);
 
                   if (scheme == 'tel' || scheme == 'mailto') {
                     if (await canLaunchUrl(uri!)) {
                       await launchUrl(uri, mode: LaunchMode.externalApplication);
                     }
-                    setState(() => _isLoading = false); // ✅ FIX
+                    setState(() => _isLoading = false);
                     return NavigationActionPolicy.CANCEL;
                   }
 
@@ -296,7 +324,7 @@ class _WebViewPageState extends State<WebViewPage> {
                         const SnackBar(content: Text("WhatsApp not installed")),
                       );
                     }
-                    setState(() => _isLoading = false); // ✅ FIX
+                    setState(() => _isLoading = false);
                     return NavigationActionPolicy.CANCEL;
                   }
 
@@ -304,7 +332,6 @@ class _WebViewPageState extends State<WebViewPage> {
                 },
                 onLoadStart: (_, __) => setState(() => _isLoading = true),
                 onLoadStop: (_, __) => setState(() => _isLoading = false),
-
               ),
               if (_isLoading)
                 const Center(child: CircularProgressIndicator()),
