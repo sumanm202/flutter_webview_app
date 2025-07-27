@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,10 +12,10 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// Local notifications plugin initialization
+// Initialize local notifications plugin for handling foreground notifications
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
-// Android notification channel setup
+// Configure Android notification channel for high-priority notifications
 const AndroidNotificationChannel channel = AndroidNotificationChannel(
   'high_importance_channel',
   'High Importance Notifications',
@@ -23,7 +24,7 @@ const AndroidNotificationChannel channel = AndroidNotificationChannel(
   playSound: true,
 );
 
-/// Firebase background message handler
+// Background message handler for Firebase Cloud Messaging (FCM)
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   print('🔔 Background message: ${message.messageId}');
@@ -32,7 +33,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   print('📦 Background data: ${message.data}');
 }
 
-/// Entry point of the application
+// Application entry point
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
@@ -48,7 +49,6 @@ void main() async {
     sound: true,
   );
 
-  // Request permissions
   await [
     Permission.camera,
     Permission.microphone,
@@ -60,7 +60,7 @@ void main() async {
   runApp(const MyApp());
 }
 
-/// Root widget of the application
+// Root widget of the application
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -74,7 +74,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
-/// Splash screen that checks for stored session ID
+// Splash screen widget to display logo and validate session
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -86,15 +86,38 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
+    // Navigate to WebViewPage after 2 seconds, validating stored session ID
     Timer(const Duration(seconds: 2), () async {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? sessionId = prefs.getString('PHPSESSID');
+      bool isSessionValid = await _validateSession(sessionId);
+      if (!isSessionValid && sessionId != null) {
+        await prefs.remove('PHPSESSID');
+        sessionId = null;
+        print("❌ Cleared invalid PHPSESSID");
+      }
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (_) => WebViewPage(sessionId: sessionId),
         ),
       );
     });
+  }
+
+  // Validate session ID with backend
+  Future<bool> _validateSession(String? sessionId) async {
+    if (sessionId == null) return false;
+    try {
+      final response = await http.get(
+        Uri.parse('https://firstfinance.xpresspaisa.in/api/check_session.php'),
+        headers: {'Cookie': 'PHPSESSID=$sessionId'},
+      );
+      print("🟢 Session validation status: ${response.statusCode}");
+      return response.statusCode == 200;
+    } catch (e) {
+      print("❌ Session validation error: $e");
+      return false;
+    }
   }
 
   @override
@@ -119,7 +142,7 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 }
 
-/// WebView page with login tracking, FCM handling, and session persistence
+// WebView page for displaying web content with session and FCM handling
 class WebViewPage extends StatefulWidget {
   final String? sessionId;
   const WebViewPage({super.key, this.sessionId});
@@ -133,14 +156,17 @@ class _WebViewPageState extends State<WebViewPage> {
   bool _isLoading = true;
   String? _fcmToken;
   String? _userId;
+  Timer? _sessionRefreshTimer;
 
   @override
   void initState() {
     super.initState();
     initFCM();
+    // Start periodic session refresh every 12 hours
+    _sessionRefreshTimer = Timer.periodic(const Duration(hours: 12), (_) => _refreshSession());
   }
 
-  /// Initializes Firebase Cloud Messaging and sets up local notifications
+  // Set up Firebase Cloud Messaging and local notifications
   Future<void> initFCM() async {
     const InitializationSettings initSettings = InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
@@ -196,7 +222,7 @@ class _WebViewPageState extends State<WebViewPage> {
     });
   }
 
-  /// Sends user ID and FCM token to backend to register for push notifications
+  // Register FCM token with backend
   Future<void> registerToken(String userId, String token) async {
     try {
       final response = await http.post(
@@ -215,7 +241,40 @@ class _WebViewPageState extends State<WebViewPage> {
     }
   }
 
-  /// Handles back button to support WebView navigation or app exit confirmation
+  // Refresh session periodically to prevent expiration
+  Future<void> _refreshSession() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? sessionId = prefs.getString('PHPSESSID');
+    if (sessionId != null) {
+      try {
+        final response = await http.get(
+          Uri.parse('https://firstfinance.xpresspaisa.in/api/refresh_session.php'),
+          headers: {'Cookie': 'PHPSESSID=$sessionId'},
+        );
+        if (response.statusCode == 200) {
+          final jsonResponse = jsonDecode(response.body);
+          if (jsonResponse['session_id'] != null) {
+            await prefs.setString('PHPSESSID', jsonResponse['session_id']);
+            print("💾 Updated PHPSESSID: ${jsonResponse['session_id']}");
+          }
+          print("✅ Session refreshed");
+        } else {
+          await prefs.remove('PHPSESSID');
+          print("❌ Session refresh failed, cleared PHPSESSID");
+          // Reload WebView to trigger login
+          if (webViewController != null) {
+            webViewController!.loadUrl(
+              urlRequest: URLRequest(url: WebUri("https://firstfinance.xpresspaisa.in/home.php")),
+            );
+          }
+        }
+      } catch (e) {
+        print("❌ Session refresh error: $e");
+      }
+    }
+  }
+
+  // Handle back button for WebView navigation or app exit
   Future<bool> _onBackPressed() async {
     if (webViewController != null && await webViewController!.canGoBack()) {
       webViewController!.goBack();
@@ -308,6 +367,16 @@ class _WebViewPageState extends State<WebViewPage> {
 
                   setState(() => _isLoading = true);
 
+                  // Detect redirect to login page indicating session expiration
+                  if (uri.toString().contains('/login.php')) {
+                    SharedPreferences prefs = await SharedPreferences.getInstance();
+                    await prefs.remove('PHPSESSID');
+                    print("❌ Session expired, cleared PHPSESSID");
+
+                    setState(() => _isLoading = false);
+                    return NavigationActionPolicy.ALLOW;
+                  }
+
                   if (scheme == 'tel' || scheme == 'mailto') {
                     if (await canLaunchUrl(uri!)) {
                       await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -340,5 +409,11 @@ class _WebViewPageState extends State<WebViewPage> {
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _sessionRefreshTimer?.cancel(); // Clean up timer
+    super.dispose();
   }
 }
