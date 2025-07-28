@@ -1,10 +1,8 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
-import 'package:http/http.dart' as http;
+import 'package:flutter_webview_app/session_manager.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -12,10 +10,8 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// Initialize local notifications plugin for handling foreground notifications
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
-// Configure Android notification channel for high-priority notifications
 const AndroidNotificationChannel channel = AndroidNotificationChannel(
   'high_importance_channel',
   'High Importance Notifications',
@@ -24,16 +20,14 @@ const AndroidNotificationChannel channel = AndroidNotificationChannel(
   playSound: true,
 );
 
-// Background message handler for Firebase Cloud Messaging (FCM)
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   print('🔔 Background message: ${message.messageId}');
-  print('📩 Background notification title: ${message.notification?.title}');
-  print('📩 Background notification body: ${message.notification?.body}');
-  print('📦 Background data: ${message.data}');
+  print('📩 Title: ${message.notification?.title}');
+  print('📩 Body: ${message.notification?.body}');
+  print('📦 Data: ${message.data}');
 }
 
-// Application entry point
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
@@ -60,7 +54,6 @@ void main() async {
   runApp(const MyApp());
 }
 
-// Root widget of the application
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -74,7 +67,6 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// Splash screen widget to display logo and validate session
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -86,11 +78,10 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    // Navigate to WebViewPage after 2 seconds, validating stored session ID
     Timer(const Duration(seconds: 2), () async {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? sessionId = prefs.getString('PHPSESSID');
-      bool isSessionValid = await _validateSession(sessionId);
+      bool isSessionValid = await SessionManager.checkSession(sessionId);
       if (!isSessionValid && sessionId != null) {
         await prefs.remove('PHPSESSID');
         sessionId = null;
@@ -104,37 +95,17 @@ class _SplashScreenState extends State<SplashScreen> {
     });
   }
 
-  // Validate session ID with backend
-  Future<bool> _validateSession(String? sessionId) async {
-    if (sessionId == null) return false;
-    try {
-      final response = await http.get(
-        Uri.parse('https://firstfinance.xpresspaisa.in/api/check_session.php'),
-        headers: {'Cookie': 'PHPSESSID=$sessionId'},
-      );
-      print("🟢 Session validation status: ${response.statusCode}");
-      return response.statusCode == 200;
-    } catch (e) {
-      print("❌ Session validation error: $e");
-      return false;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return const Scaffold(
       backgroundColor: Colors.white,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Image.asset(
-              'assets/images/logo.png',
-              width: 150,
-              height: 150,
-            ),
-            const SizedBox(height: 20),
-            const CircularProgressIndicator(),
+            Image(image: AssetImage('assets/images/logo.png'), width: 150, height: 150),
+            SizedBox(height: 20),
+            CircularProgressIndicator(),
           ],
         ),
       ),
@@ -142,7 +113,6 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 }
 
-// WebView page for displaying web content with session and FCM handling
 class WebViewPage extends StatefulWidget {
   final String? sessionId;
   const WebViewPage({super.key, this.sessionId});
@@ -162,11 +132,9 @@ class _WebViewPageState extends State<WebViewPage> {
   void initState() {
     super.initState();
     initFCM();
-    // Start periodic session refresh every 12 hours
     _sessionRefreshTimer = Timer.periodic(const Duration(hours: 12), (_) => _refreshSession());
   }
 
-  // Set up Firebase Cloud Messaging and local notifications
   Future<void> initFCM() async {
     const InitializationSettings initSettings = InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
@@ -180,18 +148,13 @@ class _WebViewPageState extends State<WebViewPage> {
       print("✅ FCM Token: $_fcmToken");
 
       if (_userId != null && _fcmToken != null) {
-        await registerToken(_userId!, _fcmToken!);
+        await SessionManager.registerToken(_userId!, _fcmToken!);
       }
     }
 
     FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
       RemoteNotification? notification = message.notification;
       AndroidNotification? android = message.notification?.android;
-
-      print("🔔 Foreground notification received");
-      print("📩 Title: ${notification?.title}");
-      print("📩 Body: ${notification?.body}");
-      print("📦 Data: ${message.data}");
 
       if (notification != null && android != null) {
         const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
@@ -214,67 +177,33 @@ class _WebViewPageState extends State<WebViewPage> {
 
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       final url = message.data['url'];
-      print("📲 Notification tapped");
-      print("📦 Data: ${message.data}");
       if (url != null && webViewController != null) {
         webViewController!.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
       }
     });
   }
 
-  // Register FCM token with backend
-  Future<void> registerToken(String userId, String token) async {
-    try {
-      final response = await http.post(
-        Uri.parse('https://firstfinance.xpresspaisa.in/api/register_token.php'),
-        body: {
-          'user_id': userId,
-          'token': token,
-          'platform': Platform.isAndroid ? 'android' : 'ios',
-        },
-      );
-      print("✅ Token register request sent");
-      print("🟢 Status Code: ${response.statusCode}");
-      print("📦 Response Body: ${response.body}");
-    } catch (e) {
-      print("❌ Token registration error: $e");
-    }
-  }
-
-  // Refresh session periodically to prevent expiration
   Future<void> _refreshSession() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? sessionId = prefs.getString('PHPSESSID');
     if (sessionId != null) {
-      try {
-        final response = await http.get(
-          Uri.parse('https://firstfinance.xpresspaisa.in/api/refresh_session.php'),
-          headers: {'Cookie': 'PHPSESSID=$sessionId'},
-        );
-        if (response.statusCode == 200) {
-          final jsonResponse = jsonDecode(response.body);
-          if (jsonResponse['session_id'] != null) {
-            await prefs.setString('PHPSESSID', jsonResponse['session_id']);
-            print("💾 Updated PHPSESSID: ${jsonResponse['session_id']}");
-          }
-          print("✅ Session refreshed");
-        } else {
-          await prefs.remove('PHPSESSID');
-          print("❌ Session refresh failed, cleared PHPSESSID");
-          // Reload WebView to trigger login
-          if (webViewController != null) {
-            webViewController!.loadUrl(
-              urlRequest: URLRequest(url: WebUri("https://firstfinance.xpresspaisa.in/home.php")),
-            );
-          }
+      final newSessionId = await SessionManager.refreshSession(sessionId);
+      if (newSessionId != null) {
+        await prefs.setString('PHPSESSID', newSessionId);
+        print("💾 Updated PHPSESSID: $newSessionId");
+      } else {
+        await prefs.remove('PHPSESSID');
+        print("❌ Session refresh failed, cleared PHPSESSID");
+
+        if (webViewController != null) {
+          webViewController!.loadUrl(
+            urlRequest: URLRequest(url: WebUri("https://firstfinance.xpresspaisa.in/home.php")),
+          );
         }
-      } catch (e) {
-        print("❌ Session refresh error: $e");
       }
     }
   }
 
-  // Handle back button for WebView navigation or app exit
   Future<bool> _onBackPressed() async {
     if (webViewController != null && await webViewController!.canGoBack()) {
       webViewController!.goBack();
@@ -311,9 +240,9 @@ class _WebViewPageState extends State<WebViewPage> {
               InAppWebView(
                 initialUrlRequest: URLRequest(
                   url: WebUri("https://firstfinance.xpresspaisa.in/home.php"),
-                  headers: widget.sessionId != null ? {
-                    'Cookie': 'PHPSESSID=${widget.sessionId}'
-                  } : null,
+                  headers: widget.sessionId != null
+                      ? {'Cookie': 'PHPSESSID=${widget.sessionId}'}
+                      : null,
                 ),
                 initialSettings: InAppWebViewSettings(
                   javaScriptEnabled: true,
@@ -339,7 +268,8 @@ class _WebViewPageState extends State<WebViewPage> {
                         _userId = args[0].toString();
                         print("👤 Logged in User ID: $_userId");
 
-                        final cookies = await CookieManager.instance().getCookies(url: WebUri("https://firstfinance.xpresspaisa.in"));
+                        final cookies = await CookieManager.instance().getCookies(
+                            url: WebUri("https://firstfinance.xpresspaisa.in"));
                         for (var cookie in cookies) {
                           if (cookie.name == 'PHPSESSID') {
                             SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -349,7 +279,7 @@ class _WebViewPageState extends State<WebViewPage> {
                         }
 
                         if (_fcmToken != null && _userId != null) {
-                          await registerToken(_userId!, _fcmToken!);
+                          await SessionManager.registerToken(_userId!, _fcmToken!);
                         }
                       }
                     },
@@ -367,12 +297,10 @@ class _WebViewPageState extends State<WebViewPage> {
 
                   setState(() => _isLoading = true);
 
-                  // Detect redirect to login page indicating session expiration
                   if (uri.toString().contains('/login.php')) {
                     SharedPreferences prefs = await SharedPreferences.getInstance();
                     await prefs.remove('PHPSESSID');
                     print("❌ Session expired, cleared PHPSESSID");
-
                     setState(() => _isLoading = false);
                     return NavigationActionPolicy.ALLOW;
                   }
@@ -402,8 +330,7 @@ class _WebViewPageState extends State<WebViewPage> {
                 onLoadStart: (_, __) => setState(() => _isLoading = true),
                 onLoadStop: (_, __) => setState(() => _isLoading = false),
               ),
-              if (_isLoading)
-                const Center(child: CircularProgressIndicator()),
+              if (_isLoading) const Center(child: CircularProgressIndicator()),
             ],
           ),
         ),
@@ -413,7 +340,7 @@ class _WebViewPageState extends State<WebViewPage> {
 
   @override
   void dispose() {
-    _sessionRefreshTimer?.cancel(); // Clean up timer
+    _sessionRefreshTimer?.cancel();
     super.dispose();
   }
 }
