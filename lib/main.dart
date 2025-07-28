@@ -1,14 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
-import 'package:flutter_webview_app/session_manager.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_webview_app/session_manager.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
@@ -56,7 +56,6 @@ void main() async {
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
-
   @override
   Widget build(BuildContext context) {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -69,7 +68,6 @@ class MyApp extends StatelessWidget {
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
-
   @override
   State<SplashScreen> createState() => _SplashScreenState();
 }
@@ -78,19 +76,9 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    Timer(const Duration(seconds: 2), () async {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? sessionId = prefs.getString('PHPSESSID');
-      bool isSessionValid = await SessionManager.checkSession(sessionId);
-      if (!isSessionValid && sessionId != null) {
-        await prefs.remove('PHPSESSID');
-        sessionId = null;
-        print("❌ Cleared invalid PHPSESSID");
-      }
+    Timer(const Duration(seconds: 2), () {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => WebViewPage(sessionId: sessionId),
-        ),
+        MaterialPageRoute(builder: (_) => const WebViewPage()),
       );
     });
   }
@@ -114,9 +102,7 @@ class _SplashScreenState extends State<SplashScreen> {
 }
 
 class WebViewPage extends StatefulWidget {
-  final String? sessionId;
-  const WebViewPage({super.key, this.sessionId});
-
+  const WebViewPage({super.key});
   @override
   State<WebViewPage> createState() => _WebViewPageState();
 }
@@ -126,13 +112,11 @@ class _WebViewPageState extends State<WebViewPage> {
   bool _isLoading = true;
   String? _fcmToken;
   String? _userId;
-  Timer? _sessionRefreshTimer;
 
   @override
   void initState() {
     super.initState();
     initFCM();
-    _sessionRefreshTimer = Timer.periodic(const Duration(hours: 12), (_) => _refreshSession());
   }
 
   Future<void> initFCM() async {
@@ -142,11 +126,9 @@ class _WebViewPageState extends State<WebViewPage> {
     await flutterLocalNotificationsPlugin.initialize(initSettings);
 
     NotificationSettings settings = await FirebaseMessaging.instance.requestPermission();
-
     if (settings.authorizationStatus == AuthorizationStatus.authorized) {
       _fcmToken = await FirebaseMessaging.instance.getToken();
       print("✅ FCM Token: $_fcmToken");
-
       if (_userId != null && _fcmToken != null) {
         await SessionManager.registerToken(_userId!, _fcmToken!);
       }
@@ -157,7 +139,7 @@ class _WebViewPageState extends State<WebViewPage> {
       AndroidNotification? android = message.notification?.android;
 
       if (notification != null && android != null) {
-        const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+        const androidDetails = AndroidNotificationDetails(
           'high_importance_channel',
           'High Importance Notifications',
           channelDescription: 'Used for important notifications.',
@@ -165,7 +147,7 @@ class _WebViewPageState extends State<WebViewPage> {
           priority: Priority.high,
           playSound: true,
         );
-        const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
+        const platformDetails = NotificationDetails(android: androidDetails);
         await flutterLocalNotificationsPlugin.show(
           notification.hashCode,
           notification.title,
@@ -183,27 +165,6 @@ class _WebViewPageState extends State<WebViewPage> {
     });
   }
 
-  Future<void> _refreshSession() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String? sessionId = prefs.getString('PHPSESSID');
-    if (sessionId != null) {
-      final newSessionId = await SessionManager.refreshSession(sessionId);
-      if (newSessionId != null) {
-        await prefs.setString('PHPSESSID', newSessionId);
-        print("💾 Updated PHPSESSID: $newSessionId");
-      } else {
-        await prefs.remove('PHPSESSID');
-        print("❌ Session refresh failed, cleared PHPSESSID");
-
-        if (webViewController != null) {
-          webViewController!.loadUrl(
-            urlRequest: URLRequest(url: WebUri("https://firstfinance.xpresspaisa.in/home.php")),
-          );
-        }
-      }
-    }
-  }
-
   Future<bool> _onBackPressed() async {
     if (webViewController != null && await webViewController!.canGoBack()) {
       webViewController!.goBack();
@@ -215,14 +176,8 @@ class _WebViewPageState extends State<WebViewPage> {
           title: const Text("Exit App"),
           content: const Text("Do you really want to exit?"),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text("No"),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text("Yes"),
-            ),
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text("No")),
+            TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text("Yes")),
           ],
         ),
       ) ?? false;
@@ -240,9 +195,6 @@ class _WebViewPageState extends State<WebViewPage> {
               InAppWebView(
                 initialUrlRequest: URLRequest(
                   url: WebUri("https://firstfinance.xpresspaisa.in/home.php"),
-                  headers: widget.sessionId != null
-                      ? {'Cookie': 'PHPSESSID=${widget.sessionId}'}
-                      : null,
                 ),
                 initialSettings: InAppWebViewSettings(
                   javaScriptEnabled: true,
@@ -256,7 +208,6 @@ class _WebViewPageState extends State<WebViewPage> {
                   allowFileAccess: true,
                   allowUniversalAccessFromFileURLs: true,
                   useHybridComposition: true,
-                  transparentBackground: false,
                 ),
                 onWebViewCreated: (controller) {
                   webViewController = controller;
@@ -267,17 +218,6 @@ class _WebViewPageState extends State<WebViewPage> {
                       if (args.isNotEmpty) {
                         _userId = args[0].toString();
                         print("👤 Logged in User ID: $_userId");
-
-                        final cookies = await CookieManager.instance().getCookies(
-                            url: WebUri("https://firstfinance.xpresspaisa.in"));
-                        for (var cookie in cookies) {
-                          if (cookie.name == 'PHPSESSID') {
-                            SharedPreferences prefs = await SharedPreferences.getInstance();
-                            await prefs.setString('PHPSESSID', cookie.value);
-                            print("💾 Saved PHPSESSID: ${cookie.value}");
-                          }
-                        }
-
                         if (_fcmToken != null && _userId != null) {
                           await SessionManager.registerToken(_userId!, _fcmToken!);
                         }
@@ -294,16 +234,7 @@ class _WebViewPageState extends State<WebViewPage> {
                 shouldOverrideUrlLoading: (controller, action) async {
                   final uri = action.request.url;
                   final scheme = uri?.scheme;
-
                   setState(() => _isLoading = true);
-
-                  if (uri.toString().contains('/login.php')) {
-                    SharedPreferences prefs = await SharedPreferences.getInstance();
-                    await prefs.remove('PHPSESSID');
-                    print("❌ Session expired, cleared PHPSESSID");
-                    setState(() => _isLoading = false);
-                    return NavigationActionPolicy.ALLOW;
-                  }
 
                   if (scheme == 'tel' || scheme == 'mailto') {
                     if (await canLaunchUrl(uri!)) {
@@ -336,11 +267,5 @@ class _WebViewPageState extends State<WebViewPage> {
         ),
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _sessionRefreshTimer?.cancel();
-    super.dispose();
   }
 }
