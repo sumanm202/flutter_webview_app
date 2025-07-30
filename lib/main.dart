@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -9,6 +8,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_webview_app/session_manager.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
@@ -112,11 +112,43 @@ class _WebViewPageState extends State<WebViewPage> {
   bool _isLoading = true;
   String? _fcmToken;
   String? _userId;
+  Timer? _sessionTimer;
+  final String _baseUrl = "https://firstfinance.xpresspaisa.in";
 
   @override
   void initState() {
     super.initState();
     initFCM();
+    SessionManager.initCookieManager();
+    _setupSessionManagement();
+  }
+
+  void _setupSessionManagement() {
+    // Check session every 15 minutes
+    _sessionTimer = Timer.periodic(const Duration(minutes: 15), (timer) async {
+      bool isValid = await SessionManager.checkSession();
+      if (!isValid) {
+        // Session expired, redirect to login
+        _redirectToLogin();
+      } else {
+        // Refresh session to extend lifetime
+        await SessionManager.refreshSession();
+      }
+    });
+  }
+
+  void _redirectToLogin() {
+    if (webViewController != null) {
+      webViewController!.loadUrl(
+        urlRequest: URLRequest(url: WebUri("$_baseUrl/login.php")),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _sessionTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> initFCM() async {
@@ -194,7 +226,7 @@ class _WebViewPageState extends State<WebViewPage> {
             children: [
               InAppWebView(
                 initialUrlRequest: URLRequest(
-                  url: WebUri("https://firstfinance.xpresspaisa.in/home.php"),
+                  url: WebUri("$_baseUrl/home.php"),
                 ),
                 initialSettings: InAppWebViewSettings(
                   javaScriptEnabled: true,
@@ -208,9 +240,26 @@ class _WebViewPageState extends State<WebViewPage> {
                   allowFileAccess: true,
                   allowUniversalAccessFromFileURLs: true,
                   useHybridComposition: true,
+                  // Enhanced cache settings
+                  cacheMode: CacheMode.LOAD_CACHE_ELSE_NETWORK,
+                  // Cookie settings
+                  thirdPartyCookiesEnabled: true,
+                  // Database settings
+                  databaseEnabled: true,
+                  // DOM storage settings
+                  domStorageEnabled: true,
+                  // Additional settings for persistence
+                  appCachePath: ".",
+                  applicationNameForUserAgent: "FirstFinance/1.0",
+                  // Cookie persistence
+                  clearSessionCache: false,
+                  // Cache persistence
+                  useShouldInterceptFetchRequest: true,
                 ),
-                onWebViewCreated: (controller) {
+                onWebViewCreated: (controller) async {
                   webViewController = controller;
+                  // Restore cookies when WebView is created
+                  await SessionManager.restoreCookies(_baseUrl);
 
                   controller.addJavaScriptHandler(
                     handlerName: 'onLogin',
@@ -220,10 +269,38 @@ class _WebViewPageState extends State<WebViewPage> {
                         print("👤 Logged in User ID: $_userId");
                         if (_fcmToken != null && _userId != null) {
                           await SessionManager.registerToken(_userId!, _fcmToken!);
+                          // Save cookies after successful login
+                          await SessionManager.saveCookies(_baseUrl);
                         }
                       }
                     },
                   );
+                },
+                onLoadStart: (controller, url) async {
+                  setState(() => _isLoading = true);
+                  // Save cookies on each page load start
+                  await SessionManager.saveCookies(_baseUrl);
+                },
+                onLoadStop: (controller, url) async {
+                  setState(() => _isLoading = false);
+                  // Send heartbeat and save cookies on each page load
+                  await SessionManager.sendHeartbeat();
+                  await SessionManager.saveCookies(_baseUrl);
+                },
+                onReceivedHttpError: (controller, request, errorResponse) async {
+                  if (errorResponse.statusCode == 401) {
+                    // Session expired
+                    _redirectToLogin();
+                  }
+                },
+                shouldInterceptFetchRequest: (controller, fetchRequest) async {
+                  // Add stored cookies to all requests
+                  final prefs = await SharedPreferences.getInstance();
+                  final storedCookies = prefs.getString('saved_cookies');
+                  if (storedCookies != null) {
+                    fetchRequest.headers?['Cookie'] = storedCookies;
+                  }
+                  return fetchRequest;
                 },
                 androidOnPermissionRequest: (controller, origin, resources) async {
                   return PermissionRequestResponse(
@@ -258,8 +335,6 @@ class _WebViewPageState extends State<WebViewPage> {
 
                   return NavigationActionPolicy.ALLOW;
                 },
-                onLoadStart: (_, __) => setState(() => _isLoading = true),
-                onLoadStop: (_, __) => setState(() => _isLoading = false),
               ),
               if (_isLoading) const Center(child: CircularProgressIndicator()),
             ],

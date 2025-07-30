@@ -1,37 +1,34 @@
 name: flutter_webview_app
-description: A new Flutter project for FirstFinance.
-publish_to: "none"
-
+description: First Finance WebView App
+publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.7.2
+  sdk: '>=3.1.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
+  cupertino_icons: ^1.0.6
 
-  # Cupertino Icons (iOS-style)
-  cupertino_icons: ^1.0.8
+  # WebView and device integrations
+  flutter_inappwebview: ^6.0.0
+  url_launcher: ^6.2.2
+  http: ^1.1.2
+  path_provider: ^2.1.1
+  permission_handler: ^11.1.0
+  shared_preferences: ^2.2.3
 
-  # 🌐 WebView & Permissions
-
-  flutter_inappwebview: ^6.1.5
-  url_launcher: ^6.2.5
-  permission_handler: ^11.3.1
-  shared_preferences: ^2.2.2
-
-  # 🔥 Firebase & Notifications
-  firebase_core: ^2.25.0
-  firebase_messaging: ^14.7.2
-  flutter_local_notifications: ^17.0.0
-  http: ^0.13.6
+  # Firebase and notifications
+  firebase_core: ^2.24.2
+  firebase_messaging: ^14.7.10
+  flutter_local_notifications: ^17.2.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^5.0.0
-  flutter_launcher_icons: ^0.14.4
+  flutter_lints: ^3.0.1
+  flutter_launcher_icons: ^0.13.1
 
 flutter_launcher_icons:
   android: "launcher_icon"
@@ -40,6 +37,5 @@ flutter_launcher_icons:
 
 flutter:
   uses-material-design: true
-
   assets:
-    - assets/images/logo.png
+    - assets/images/

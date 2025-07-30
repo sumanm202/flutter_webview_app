@@ -8,8 +8,7 @@ plugins {
 android {
     namespace = "com.example.flutter_webview_app"
     compileSdk = rootProject.extra["compileSdkVersion"] as Int
-
-    ndkVersion = "27.0.12077973" // ✅ Only if using native C++/FFmpeg
+    ndkVersion = "27.0.12077973" // ✅ Only if you're using native C++ code
 
     defaultConfig {
         applicationId = "com.example.flutter_webview_app"
@@ -17,8 +16,7 @@ android {
         targetSdk = rootProject.extra["targetSdkVersion"] as Int
         versionCode = 1
         versionName = "1.0"
-
-        multiDexEnabled = true // ✅ Required for Firebase and large apps
+        multiDexEnabled = true
     }
 
     buildTypes {
@@ -33,13 +31,14 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
         isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "17"
+        freeCompilerArgs += listOf("-Xjvm-default=all") // Optional
     }
 
     buildFeatures {
@@ -48,13 +47,17 @@ android {
 }
 
 dependencies {
-    // ✅ Java 8+ desugaring
+    // ✅ Enable Java 8+ APIs (e.g. java.time)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
-    // ✅ Firebase
+    // ✅ Firebase core services
     implementation("com.google.firebase:firebase-messaging:25.0.0")
-    implementation("com.google.firebase:firebase-analytics:21.6.1")
-    // implementation("com.google.firebase:firebase-crashlytics") // Optional
+    implementation("com.google.firebase:firebase-analytics:23.0.0")
+
+    // Optional: Firebase extensions
+    // implementation("com.google.firebase:firebase-crashlytics")
+    // implementation("com.google.firebase:firebase-auth")
+    // implementation("com.google.firebase:firebase-firestore")
 }
 
 flutter {
