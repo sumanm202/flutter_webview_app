@@ -8,6 +8,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_webview_app/session_manager.dart';
+import 'package:flutter_webview_app/background_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
@@ -50,6 +51,9 @@ void main() async {
     Permission.storage,
     Permission.notification,
   ].request();
+
+  // Initialize background service for session management
+  await BackgroundService.initializeService();
 
   runApp(const MyApp());
 }
@@ -107,32 +111,68 @@ class WebViewPage extends StatefulWidget {
   State<WebViewPage> createState() => _WebViewPageState();
 }
 
-class _WebViewPageState extends State<WebViewPage> {
+class _WebViewPageState extends State<WebViewPage> with WidgetsBindingObserver {
   InAppWebViewController? webViewController;
   bool _isLoading = true;
   String? _fcmToken;
   String? _userId;
   Timer? _sessionTimer;
+  Timer? _backgroundTimer;
   final String _baseUrl = "https://firstfinance.xpresspaisa.in";
+  bool _isOnLoginPage = false; // Track if user is on login page
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     initFCM();
     SessionManager.initCookieManager();
     _setupSessionManagement();
+    _setupBackgroundSessionManagement();
   }
 
   void _setupSessionManagement() {
-    // Check session every 15 minutes
-    _sessionTimer = Timer.periodic(const Duration(minutes: 15), (timer) async {
+    // Check session every 5 minutes (more frequent)
+    _sessionTimer = Timer.periodic(const Duration(minutes: 5), (timer) async {
+      // Don't check session if user is on login page
+      if (_isOnLoginPage) {
+        print("🔍 Skipping session check - user on login page");
+        return;
+      }
+
+      print("🔍 Checking session...");
       bool isValid = await SessionManager.checkSession();
+      print("Session valid: $isValid");
+
       if (!isValid) {
         // Session expired, redirect to login
+        print("❌ Session expired, redirecting to login");
         _redirectToLogin();
       } else {
         // Refresh session to extend lifetime
+        print("✅ Session valid, refreshing...");
         await SessionManager.refreshSession();
+        await SessionManager.saveCookies(_baseUrl);
+      }
+    });
+  }
+
+  void _setupBackgroundSessionManagement() {
+    // Background session management every 10 minutes
+    _backgroundTimer = Timer.periodic(const Duration(minutes: 10), (timer) async {
+      // Don't refresh session if user is on login page
+      if (_isOnLoginPage) {
+        print("🔄 Skipping background session refresh - user on login page");
+        return;
+      }
+
+      print("🔄 Background session refresh...");
+      try {
+        await SessionManager.refreshSession();
+        await SessionManager.saveCookies(_baseUrl);
+        print("✅ Background session refreshed");
+      } catch (e) {
+        print("❌ Background session refresh error: $e");
       }
     });
   }
@@ -146,8 +186,42 @@ class _WebViewPageState extends State<WebViewPage> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    switch (state) {
+      case AppLifecycleState.paused:
+        print("📱 App paused - saving session");
+        SessionManager.saveCookies(_baseUrl);
+        break;
+      case AppLifecycleState.resumed:
+      // Don't check session if user is on login page
+        if (_isOnLoginPage) {
+          print("📱 App resumed - skipping session check (on login page)");
+          return;
+        }
+
+        print("📱 App resumed - checking session");
+        SessionManager.checkSession().then((isValid) {
+          if (!isValid) {
+            print("❌ Session invalid on resume");
+            _redirectToLogin();
+          } else {
+            print("✅ Session valid on resume");
+            SessionManager.refreshSession();
+          }
+        });
+        break;
+      default:
+        break;
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _sessionTimer?.cancel();
+    _backgroundTimer?.cancel();
     super.dispose();
   }
 
@@ -255,6 +329,9 @@ class _WebViewPageState extends State<WebViewPage> {
                   clearSessionCache: false,
                   // Cache persistence
                   useShouldInterceptFetchRequest: true,
+                  // Additional persistence settings
+                  allowContentAccess: true,
+                  allowFileAccessFromFileURLs: true,
                 ),
                 onWebViewCreated: (controller) async {
                   webViewController = controller;
@@ -278,18 +355,37 @@ class _WebViewPageState extends State<WebViewPage> {
                 },
                 onLoadStart: (controller, url) async {
                   setState(() => _isLoading = true);
+
+                  // Check if user is on login page
+                  final currentUrl = url?.toString() ?? '';
+                  if (currentUrl.contains('login.php')) {
+                    _isOnLoginPage = true;
+                    print("📝 User is on login page: $currentUrl");
+                    print("📝 Session management PAUSED");
+                  } else {
+                    _isOnLoginPage = false;
+                    print("📝 User is on page: $currentUrl");
+                    print("📝 Session management RESUMED");
+                  }
+
                   // Save cookies on each page load start
                   await SessionManager.saveCookies(_baseUrl);
                 },
                 onLoadStop: (controller, url) async {
                   setState(() => _isLoading = false);
-                  // Send heartbeat and save cookies on each page load
-                  await SessionManager.sendHeartbeat();
+
+                  // Only send heartbeat if not on login page
+                  if (!_isOnLoginPage) {
+                    await SessionManager.sendHeartbeat();
+                  }
+
+                  // Save cookies on each page load
                   await SessionManager.saveCookies(_baseUrl);
                 },
                 onReceivedHttpError: (controller, request, errorResponse) async {
                   if (errorResponse.statusCode == 401) {
                     // Session expired
+                    print("❌ HTTP 401 - Session expired");
                     _redirectToLogin();
                   }
                 },

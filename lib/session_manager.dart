@@ -9,6 +9,8 @@ class SessionManager {
   static const String mainDomain = 'firstfinance.xpresspaisa.in';
   static CookieManager? _cookieManager;
   static const String _cookieStorageKey = 'saved_cookies';
+  static const String _lastSessionCheckKey = 'last_session_check';
+  static const String _storedCredentialsKey = 'stored_credentials';
 
   static Future<void> registerToken(String userId, String token) async {
     try {
@@ -31,6 +33,99 @@ class SessionManager {
     _cookieManager = CookieManager.instance();
   }
 
+  // Auto login with stored credentials
+  static Future<Map<String, dynamic>?> autoLogin(String email, String password) async {
+    try {
+      print("🔐 Attempting auto login for: $email");
+
+      final response = await http.post(
+        Uri.parse('${baseUrl}auto_login.php'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({
+          'email': email,
+          'password': password,
+        }),
+      ).timeout(const Duration(seconds: 10));
+
+      print("📡 Auto login response: ${response.statusCode}");
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['status'] == 'success') {
+          print("✅ Auto login successful");
+          // Save cookies after successful login
+          await saveCookies('https://$mainDomain');
+          return data;
+        } else {
+          print("❌ Auto login failed: ${data['message']}");
+          return data;
+        }
+      } else {
+        print("❌ Auto login failed with status: ${response.statusCode}");
+        return null;
+      }
+    } catch (e) {
+      print('❌ Auto login error: $e');
+      return null;
+    }
+  }
+
+  // Store credentials securely (for auto-login)
+  static Future<void> storeCredentials(String email, String password) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final credentials = {
+        'email': email,
+        'password': password,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+      await prefs.setString(_storedCredentialsKey, json.encode(credentials));
+      print("🔐 Credentials stored securely");
+    } catch (e) {
+      print("❌ Error storing credentials: $e");
+    }
+  }
+
+  // Get stored credentials
+  static Future<Map<String, dynamic>?> getStoredCredentials() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final credentialsStr = prefs.getString(_storedCredentialsKey);
+      if (credentialsStr != null) {
+        final credentials = json.decode(credentialsStr);
+        // Check if credentials are not too old (30 days)
+        final timestamp = credentials['timestamp'] as int;
+        final storedTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+        final now = DateTime.now();
+        final difference = now.difference(storedTime);
+
+        if (difference.inDays < 30) {
+          return credentials;
+        } else {
+          // Remove old credentials
+          await prefs.remove(_storedCredentialsKey);
+        }
+      }
+      return null;
+    } catch (e) {
+      print("❌ Error getting stored credentials: $e");
+      return null;
+    }
+  }
+
+  // Clear stored credentials
+  static Future<void> clearStoredCredentials() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_storedCredentialsKey);
+      print("🔐 Stored credentials cleared");
+    } catch (e) {
+      print("❌ Error clearing credentials: $e");
+    }
+  }
+
   // Check if session is valid
   static Future<bool> checkSession() async {
     try {
@@ -38,23 +133,36 @@ class SessionManager {
       final prefs = await SharedPreferences.getInstance();
       final storedCookies = prefs.getString(_cookieStorageKey);
 
+      print("🔍 Checking session with cookies: ${storedCookies?.substring(0, 50)}...");
+
       final response = await http.get(
         Uri.parse('${baseUrl}check_session.php'),
         headers: {
           'Content-Type': 'application/json',
           if (storedCookies != null) 'Cookie': storedCookies,
         },
-      );
+      ).timeout(const Duration(seconds: 10));
+
+      print("📡 Session check response: ${response.statusCode}");
 
       // Save any new cookies from response
       if (response.headers['set-cookie'] != null) {
+        print("🍪 New cookies received: ${response.headers['set-cookie']}");
         await _saveCookieFromHeader(response.headers['set-cookie']!);
       }
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        return data['status'] == 'success';
+        final isValid = data['status'] == 'success';
+        print("✅ Session check result: $isValid");
+
+        // Store last check time
+        await prefs.setInt(_lastSessionCheckKey, DateTime.now().millisecondsSinceEpoch);
+
+        return isValid;
       }
+
+      print("❌ Session check failed with status: ${response.statusCode}");
       return false;
     } catch (e) {
       print('❌ Session check error: $e');
@@ -69,23 +177,32 @@ class SessionManager {
       final prefs = await SharedPreferences.getInstance();
       final storedCookies = prefs.getString(_cookieStorageKey);
 
+      print("🔄 Refreshing session...");
+
       final response = await http.get(
         Uri.parse('${baseUrl}refresh_session.php'),
         headers: {
           'Content-Type': 'application/json',
           if (storedCookies != null) 'Cookie': storedCookies,
         },
-      );
+      ).timeout(const Duration(seconds: 10));
+
+      print("📡 Session refresh response: ${response.statusCode}");
 
       // Save any new cookies from response
       if (response.headers['set-cookie'] != null) {
+        print("🍪 New cookies from refresh: ${response.headers['set-cookie']}");
         await _saveCookieFromHeader(response.headers['set-cookie']!);
       }
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        return data['status'] == 'success';
+        final success = data['status'] == 'success';
+        print("✅ Session refresh result: $success");
+        return success;
       }
+
+      print("❌ Session refresh failed with status: ${response.statusCode}");
       return false;
     } catch (e) {
       print('❌ Session refresh error: $e');
@@ -106,7 +223,7 @@ class SessionManager {
           'Content-Type': 'application/json',
           if (storedCookies != null) 'Cookie': storedCookies,
         },
-      );
+      ).timeout(const Duration(seconds: 10));
 
       // Save any new cookies from response
       if (response.headers['set-cookie'] != null) {
@@ -114,8 +231,12 @@ class SessionManager {
       }
 
       if (response.statusCode == 200) {
-        return json.decode(response.body);
+        final data = json.decode(response.body);
+        print("💓 Heartbeat successful: ${data['message']}");
+        return data;
       }
+
+      print("❌ Heartbeat failed with status: ${response.statusCode}");
       return null;
     } catch (e) {
       print('❌ Session heartbeat error: $e');
@@ -179,7 +300,7 @@ class SessionManager {
             );
           }
 
-          print("📝 Saved cookies: ${cookieStrings.join('; ')}");
+          print("📝 Saved ${cookieStrings.length} cookies");
         }
       }
     } catch (e) {
@@ -212,11 +333,31 @@ class SessionManager {
               );
             }
           }
-          print("✅ Restored cookies: $storedCookies");
+          print("✅ Restored ${cookieList.length} cookies");
         }
       }
     } catch (e) {
       print("❌ Error restoring cookies: $e");
     }
+  }
+
+  // Get last session check time
+  static Future<DateTime?> getLastSessionCheck() async {
+    final prefs = await SharedPreferences.getInstance();
+    final timestamp = prefs.getInt(_lastSessionCheckKey);
+    if (timestamp != null) {
+      return DateTime.fromMillisecondsSinceEpoch(timestamp);
+    }
+    return null;
+  }
+
+  // Check if session check is needed (if more than 5 minutes have passed)
+  static Future<bool> isSessionCheckNeeded() async {
+    final lastCheck = await getLastSessionCheck();
+    if (lastCheck == null) return true;
+
+    final now = DateTime.now();
+    final difference = now.difference(lastCheck);
+    return difference.inMinutes >= 5;
   }
 }
