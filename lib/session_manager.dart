@@ -11,6 +11,7 @@ class SessionManager {
   static const String _cookieStorageKey = 'saved_cookies';
   static const String _lastSessionCheckKey = 'last_session_check';
   static const String _storedCredentialsKey = 'stored_credentials';
+  static const String _persistentTokenKey = 'persistent_token';
 
   static Future<void> registerToken(String userId, String token) async {
     try {
@@ -33,13 +34,13 @@ class SessionManager {
     _cookieManager = CookieManager.instance();
   }
 
-  // Auto login with stored credentials
+  // Enhanced auto login with persistent token support
   static Future<Map<String, dynamic>?> autoLogin(String email, String password) async {
     try {
-      print("🔐 Attempting auto login for: $email");
+      print("🔐 Attempting enhanced auto login for: $email");
 
       final response = await http.post(
-        Uri.parse('${baseUrl}auto_login.php'),
+        Uri.parse('${baseUrl}enhanced_auto_login.php'),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -49,25 +50,53 @@ class SessionManager {
         }),
       ).timeout(const Duration(seconds: 10));
 
-      print("📡 Auto login response: ${response.statusCode}");
+      print("📡 Enhanced auto login response: ${response.statusCode}");
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['status'] == 'success') {
-          print("✅ Auto login successful");
+          print("✅ Enhanced auto login successful");
+
+          // Store persistent token
+          if (data['persistent_token'] != null) {
+            await _storePersistentToken(data['persistent_token']);
+          }
+
           // Save cookies after successful login
           await saveCookies('https://$mainDomain');
           return data;
         } else {
-          print("❌ Auto login failed: ${data['message']}");
+          print("❌ Enhanced auto login failed: ${data['message']}");
           return data;
         }
       } else {
-        print("❌ Auto login failed with status: ${response.statusCode}");
+        print("❌ Enhanced auto login failed with status: ${response.statusCode}");
         return null;
       }
     } catch (e) {
-      print('❌ Auto login error: $e');
+      print('❌ Enhanced auto login error: $e');
+      return null;
+    }
+  }
+
+  // Store persistent token
+  static Future<void> _storePersistentToken(String token) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_persistentTokenKey, token);
+      print("🔐 Persistent token stored");
+    } catch (e) {
+      print("❌ Error storing persistent token: $e");
+    }
+  }
+
+  // Get stored persistent token
+  static Future<String?> getPersistentToken() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_persistentTokenKey);
+    } catch (e) {
+      print("❌ Error getting persistent token: $e");
       return null;
     }
   }
@@ -120,30 +149,38 @@ class SessionManager {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_storedCredentialsKey);
+      await prefs.remove(_persistentTokenKey);
       print("🔐 Stored credentials cleared");
     } catch (e) {
       print("❌ Error clearing credentials: $e");
     }
   }
 
-  // Check if session is valid
+  // Enhanced session check with persistent token support
   static Future<bool> checkSession() async {
     try {
-      // Get stored cookies and add them to the request
+      // Get stored cookies and persistent token
       final prefs = await SharedPreferences.getInstance();
       final storedCookies = prefs.getString(_cookieStorageKey);
+      final persistentToken = await getPersistentToken();
 
-      print("🔍 Checking session with cookies: ${storedCookies?.substring(0, 50)}...");
+      print("🔍 Checking enhanced session...");
+
+      // Add persistent token to cookies if available
+      String allCookies = storedCookies ?? '';
+      if (persistentToken != null) {
+        allCookies += '; persistent_token=$persistentToken';
+      }
 
       final response = await http.get(
-        Uri.parse('${baseUrl}check_session.php'),
+        Uri.parse('${baseUrl}enhanced_check_session.php'),
         headers: {
           'Content-Type': 'application/json',
-          if (storedCookies != null) 'Cookie': storedCookies,
+          if (allCookies.isNotEmpty) 'Cookie': allCookies,
         },
       ).timeout(const Duration(seconds: 10));
 
-      print("📡 Session check response: ${response.statusCode}");
+      print("📡 Enhanced session check response: ${response.statusCode}");
 
       // Save any new cookies from response
       if (response.headers['set-cookie'] != null) {
@@ -154,18 +191,23 @@ class SessionManager {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final isValid = data['status'] == 'success';
-        print("✅ Session check result: $isValid");
+        print("✅ Enhanced session check result: $isValid");
 
         // Store last check time
         await prefs.setInt(_lastSessionCheckKey, DateTime.now().millisecondsSinceEpoch);
 
+        // Update persistent token if provided
+        if (data['persistent_token'] != null) {
+          await _storePersistentToken(data['persistent_token']);
+        }
+
         return isValid;
       }
 
-      print("❌ Session check failed with status: ${response.statusCode}");
+      print("❌ Enhanced session check failed with status: ${response.statusCode}");
       return false;
     } catch (e) {
-      print('❌ Session check error: $e');
+      print('❌ Enhanced session check error: $e');
       return false;
     }
   }
@@ -173,17 +215,24 @@ class SessionManager {
   // Refresh session
   static Future<bool> refreshSession() async {
     try {
-      // Get stored cookies and add them to the request
+      // Get stored cookies and persistent token
       final prefs = await SharedPreferences.getInstance();
       final storedCookies = prefs.getString(_cookieStorageKey);
+      final persistentToken = await getPersistentToken();
 
-      print("🔄 Refreshing session...");
+      print("🔄 Refreshing enhanced session...");
+
+      // Add persistent token to cookies if available
+      String allCookies = storedCookies ?? '';
+      if (persistentToken != null) {
+        allCookies += '; persistent_token=$persistentToken';
+      }
 
       final response = await http.get(
         Uri.parse('${baseUrl}refresh_session.php'),
         headers: {
           'Content-Type': 'application/json',
-          if (storedCookies != null) 'Cookie': storedCookies,
+          if (allCookies.isNotEmpty) 'Cookie': allCookies,
         },
       ).timeout(const Duration(seconds: 10));
 
@@ -213,15 +262,22 @@ class SessionManager {
   // Send heartbeat to keep session alive
   static Future<Map<String, dynamic>?> sendHeartbeat() async {
     try {
-      // Get stored cookies and add them to the request
+      // Get stored cookies and persistent token
       final prefs = await SharedPreferences.getInstance();
       final storedCookies = prefs.getString(_cookieStorageKey);
+      final persistentToken = await getPersistentToken();
+
+      // Add persistent token to cookies if available
+      String allCookies = storedCookies ?? '';
+      if (persistentToken != null) {
+        allCookies += '; persistent_token=$persistentToken';
+      }
 
       final response = await http.get(
         Uri.parse('${baseUrl}session_heartbeat.php'),
         headers: {
           'Content-Type': 'application/json',
-          if (storedCookies != null) 'Cookie': storedCookies,
+          if (allCookies.isNotEmpty) 'Cookie': allCookies,
         },
       ).timeout(const Duration(seconds: 10));
 
@@ -252,10 +308,18 @@ class SessionManager {
       for (var cookieStr in cookieValues) {
         final parts = cookieStr.split(';')[0].split('=');
         if (parts.length == 2) {
+          final cookieName = parts[0].trim();
+          final cookieValue = parts[1].trim();
+
+          // Store persistent token separately
+          if (cookieName == 'persistent_token') {
+            await _storePersistentToken(cookieValue);
+          }
+
           await _cookieManager?.setCookie(
             url: WebUri('https://$mainDomain'),
-            name: parts[0].trim(),
-            value: parts[1].trim(),
+            name: cookieName,
+            value: cookieValue,
             domain: mainDomain,
             path: '/',
             expiresDate: DateTime.now().add(const Duration(days: 70)).millisecondsSinceEpoch,

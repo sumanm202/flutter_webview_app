@@ -120,6 +120,7 @@ class _WebViewPageState extends State<WebViewPage> with WidgetsBindingObserver {
   Timer? _backgroundTimer;
   final String _baseUrl = "https://firstfinance.xpresspaisa.in";
   bool _isOnLoginPage = false; // Track if user is on login page
+  bool _isAutoLoggingIn = false; // Track if auto-login is in progress
 
   @override
   void initState() {
@@ -129,24 +130,95 @@ class _WebViewPageState extends State<WebViewPage> with WidgetsBindingObserver {
     SessionManager.initCookieManager();
     _setupSessionManagement();
     _setupBackgroundSessionManagement();
+    _attemptAutoLogin();
+  }
+
+  // Attempt auto-login on app start
+  Future<void> _attemptAutoLogin() async {
+    try {
+      print("🔐 Attempting auto-login on app start...");
+
+      // First check if we have a valid session
+      bool isValid = await SessionManager.checkSession();
+      if (isValid) {
+        print("✅ Valid session found, no auto-login needed");
+        return;
+      }
+
+      // Try auto-login with stored credentials
+      final credentials = await SessionManager.getStoredCredentials();
+      if (credentials != null) {
+        _isAutoLoggingIn = true;
+        print("🔐 Attempting auto-login with stored credentials...");
+
+        final result = await SessionManager.autoLogin(
+          credentials['email'],
+          credentials['password'],
+        );
+
+        if (result != null && result['status'] == 'success') {
+          print("✅ Auto-login successful!");
+          _userId = result['user_id'].toString();
+
+          // Register FCM token if available
+          if (_fcmToken != null && _userId != null) {
+            await SessionManager.registerToken(_userId!, _fcmToken!);
+          }
+
+          // Navigate to dashboard
+          if (webViewController != null) {
+            webViewController!.loadUrl(
+              urlRequest: URLRequest(url: WebUri("$_baseUrl/dashboard.php")),
+            );
+          }
+        } else {
+          print("❌ Auto-login failed, user needs to login manually");
+        }
+        _isAutoLoggingIn = false;
+      } else {
+        print("📝 No stored credentials found, user needs to login manually");
+      }
+    } catch (e) {
+      print("❌ Auto-login error: $e");
+      _isAutoLoggingIn = false;
+    }
   }
 
   void _setupSessionManagement() {
     // Check session every 5 minutes (more frequent)
     _sessionTimer = Timer.periodic(const Duration(minutes: 5), (timer) async {
-      // Don't check session if user is on login page
-      if (_isOnLoginPage) {
-        print("🔍 Skipping session check - user on login page");
+      // Don't check session if user is on login page or auto-login is in progress
+      if (_isOnLoginPage || _isAutoLoggingIn) {
+        print("🔍 Skipping session check - user on login page or auto-login in progress");
         return;
       }
 
-      print("🔍 Checking session...");
+      print("🔍 Checking enhanced session...");
       bool isValid = await SessionManager.checkSession();
       print("Session valid: $isValid");
 
       if (!isValid) {
-        // Session expired, redirect to login
-        print("❌ Session expired, redirecting to login");
+        // Try auto-login before redirecting
+        print("❌ Session expired, attempting auto-login...");
+        final credentials = await SessionManager.getStoredCredentials();
+        if (credentials != null) {
+          _isAutoLoggingIn = true;
+          final result = await SessionManager.autoLogin(
+            credentials['email'],
+            credentials['password'],
+          );
+
+          if (result != null && result['status'] == 'success') {
+            print("✅ Auto-login successful, session restored!");
+            _userId = result['user_id'].toString();
+            _isAutoLoggingIn = false;
+            return;
+          }
+          _isAutoLoggingIn = false;
+        }
+
+        // If auto-login failed, redirect to login
+        print("❌ Auto-login failed, redirecting to login");
         _redirectToLogin();
       } else {
         // Refresh session to extend lifetime
@@ -160,9 +232,9 @@ class _WebViewPageState extends State<WebViewPage> with WidgetsBindingObserver {
   void _setupBackgroundSessionManagement() {
     // Background session management every 10 minutes
     _backgroundTimer = Timer.periodic(const Duration(minutes: 10), (timer) async {
-      // Don't refresh session if user is on login page
-      if (_isOnLoginPage) {
-        print("🔄 Skipping background session refresh - user on login page");
+      // Don't refresh session if user is on login page or auto-login is in progress
+      if (_isOnLoginPage || _isAutoLoggingIn) {
+        print("🔄 Skipping background session refresh - user on login page or auto-login in progress");
         return;
       }
 
@@ -195,17 +267,17 @@ class _WebViewPageState extends State<WebViewPage> with WidgetsBindingObserver {
         SessionManager.saveCookies(_baseUrl);
         break;
       case AppLifecycleState.resumed:
-      // Don't check session if user is on login page
-        if (_isOnLoginPage) {
-          print("📱 App resumed - skipping session check (on login page)");
+      // Don't check session if user is on login page or auto-login is in progress
+        if (_isOnLoginPage || _isAutoLoggingIn) {
+          print("📱 App resumed - skipping session check (on login page or auto-login in progress)");
           return;
         }
 
         print("📱 App resumed - checking session");
         SessionManager.checkSession().then((isValid) {
           if (!isValid) {
-            print("❌ Session invalid on resume");
-            _redirectToLogin();
+            print("❌ Session invalid on resume, attempting auto-login...");
+            _attemptAutoLogin();
           } else {
             print("✅ Session valid on resume");
             SessionManager.refreshSession();
@@ -344,6 +416,12 @@ class _WebViewPageState extends State<WebViewPage> with WidgetsBindingObserver {
                       if (args.isNotEmpty) {
                         _userId = args[0].toString();
                         print("👤 Logged in User ID: $_userId");
+
+                        // Store credentials for auto-login
+                        if (args.length >= 3) {
+                          await SessionManager.storeCredentials(args[1].toString(), args[2].toString());
+                        }
+
                         if (_fcmToken != null && _userId != null) {
                           await SessionManager.registerToken(_userId!, _fcmToken!);
                           // Save cookies after successful login
@@ -393,8 +471,15 @@ class _WebViewPageState extends State<WebViewPage> with WidgetsBindingObserver {
                   // Add stored cookies to all requests
                   final prefs = await SharedPreferences.getInstance();
                   final storedCookies = prefs.getString('saved_cookies');
-                  if (storedCookies != null) {
-                    fetchRequest.headers?['Cookie'] = storedCookies;
+                  final persistentToken = await SessionManager.getPersistentToken();
+
+                  String allCookies = storedCookies ?? '';
+                  if (persistentToken != null) {
+                    allCookies += '; persistent_token=$persistentToken';
+                  }
+
+                  if (allCookies.isNotEmpty) {
+                    fetchRequest.headers?['Cookie'] = allCookies;
                   }
                   return fetchRequest;
                 },
